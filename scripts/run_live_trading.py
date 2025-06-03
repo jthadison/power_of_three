@@ -23,7 +23,7 @@ def main():
     try:
         # Test import
         print("📦 Importing LiveTradingEngine...")
-        from src.power_of_3.live.trading_engine import LiveTradingEngine
+        from power_of_3.live.trading_engine import LiveTradingEngine
         print("✅ Import successful!")
         
         # Create engine

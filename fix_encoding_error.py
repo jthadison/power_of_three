@@ -1,10 +1,22 @@
-"""Live trading engine that runs continuously"""
-import logging
-import time
-from datetime import datetime
-from typing import Dict
+#!/usr/bin/env python3
+"""
+Fix Unicode Encoding Error
+==========================
+Quick fix for the Windows encoding issue when creating trading engine.
+"""
 
+from pathlib import Path
+
+def create_simple_trading_engine():
+    """Create a simple trading engine without Unicode characters"""
+    
+    # Simple content without emojis to avoid encoding issues
+    trading_engine_content = '''"""Live trading engine that runs continuously"""
+import time
 import schedule
+from datetime import datetime
+from typing import Dict, List, Optional
+import logging
 
 # Import with better error handling
 try:
@@ -59,7 +71,7 @@ class LiveTradingEngine:
         try:
             oanda_key = config.get('api_keys', {}).get('oanda')
             oanda_account = config.get('oanda_account_id')
-            self.broker = OandaBroker(oanda_key, oanda_account) if OandaBroker and oanda_key and isinstance(oanda_account, str) else None  # noqa: E501
+            self.broker = OandaBroker(oanda_key, oanda_account) if OandaBroker and oanda_key else None
         except Exception as e:
             print(f"Could not initialize broker: {e}")
             self.broker = None
@@ -244,3 +256,79 @@ class LiveTradingEngine:
         except Exception as e:
             if self.logger:
                 self.logger.error(f"Position monitoring error: {e}")
+'''
+    
+    # Save the trading engine with proper UTF-8 encoding
+    trading_engine_file = Path('src/power_of_3/live/trading_engine.py')
+    trading_engine_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        # Use UTF-8 encoding to avoid Windows encoding issues
+        with open(trading_engine_file, 'w', encoding='utf-8') as f:
+            f.write(trading_engine_content)
+        
+        print(f"Successfully created: {trading_engine_file}")
+        return True
+        
+    except Exception as e:
+        print(f"Error creating trading engine: {e}")
+        return False
+
+def test_fixed_system():
+    """Test the fixed system"""
+    print("\nTesting the fixed system...")
+    
+    import sys
+    from pathlib import Path
+    
+    # Add src to path
+    src_path = Path('src').absolute()
+    if str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+    
+    try:
+        # Test import
+        from power_of_3.live.trading_engine import LiveTradingEngine
+        print("SUCCESS: Import works!")
+        
+        # Test creation
+        engine = LiveTradingEngine({'test_mode': True})
+        print("SUCCESS: Engine created!")
+        
+        # Test start
+        engine.start()
+        print("SUCCESS: Engine started!")
+        
+        # Test status
+        status = engine.get_status()
+        print(f"SUCCESS: Status retrieved: {status['running']}")
+        
+        # Test stop
+        engine.stop()
+        print("SUCCESS: Engine stopped!")
+        
+        return True
+        
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return False
+
+if __name__ == "__main__":
+    print("FIXING UNICODE ENCODING ERROR")
+    print("=" * 35)
+    
+    # Create the fixed trading engine
+    if create_simple_trading_engine():
+        print("Fixed trading engine created successfully!")
+        
+        # Test the system
+        if test_fixed_system():
+            print("\nALL TESTS PASSED!")
+            print("Your Power of 3 system is now working correctly.")
+            print("\nNext steps:")
+            print("1. Run: python scripts/run_live_trading.py")
+            print("2. Or test with: python test_imports.py")
+        else:
+            print("\nSome tests failed. Check the errors above.")
+    else:
+        print("Failed to create trading engine.")

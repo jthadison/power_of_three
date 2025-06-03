@@ -170,6 +170,39 @@ class TradingDatabase:
     # TRADE MANAGEMENT
     # =========================================================================
     
+    def update_signal_order_id(self, signal_id: str, order_id: str):
+        """
+        Update signal with broker order ID
+        
+        Args:
+            signal_id: UUID of the signal record
+            order_id: Broker's order ID
+        """
+        try:
+            with self.engine.connect() as conn:
+                query = text("""
+                    UPDATE signals 
+                    SET execution_reason = :order_id,
+                        status = 'executed'
+                    WHERE id = :signal_id OR signal_id = :signal_id
+                """)
+                
+                result = conn.execute(query, {
+                    'signal_id': signal_id,
+                    'order_id': f"Broker Order ID: {order_id}"
+                })
+                
+                conn.commit()
+                
+                if result.rowcount > 0:
+                    logger.info(f"Signal {signal_id} updated with order ID: {order_id}")
+                else:
+                    logger.warning(f"No signal found with ID: {signal_id}")
+                    
+        except Exception as e:
+            logger.error(f"Error updating signal order ID: {e}")
+            raise
+
     def log_trade_entry(self, trade_data: Dict) -> str:
         """
         Log trade entry to database
