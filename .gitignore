@@ -16,3 +16,5 @@ dist/
 # Virtual environments
 venv/
 env/
+
+output_tracking/
