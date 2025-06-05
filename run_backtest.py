@@ -8,27 +8,26 @@ Integrates seamlessly with your existing architecture.
 
 Usage Examples:
     # Single symbol backtest
-    python run_backtest.py single --symbol US30 --start 2024-01-01 --end 2024-03-31
+    python run_backtest.py single --symbol US30 --start 2024-01-01 --end 2024-03-31 --plot
     
     # Multi-symbol comparison
-    python run_backtest.py multi --symbols US30 NAS100 SPX500 --start 2024-01-01 --end 2024-03-31
+    python run_backtest.py multi --symbols US30 NAS100 SPX500 --start 2024-01-01 --end 2024-03-31 --plot
     
     # Parameter optimization
-    python run_backtest.py optimize --symbol US30 --start 2024-01-01 --end 2024-03-31
+    python run_backtest.py optimize --symbol US30 --start 2024-01-01 --end 2024-03-31 --plot
     
     # Quick test with default parameters
     python run_backtest.py quick --symbol US30
 """
 
+import sys
+import os
 import argparse
 import asyncio
-import logging
-import sys
-from datetime import datetime, timedelta
 from pathlib import Path
-
-from src.power_of_3.data.providers.data_provider import DataProvider
-from src.power_of_3.backtesting.engine import FallbackDataProvider
+from datetime import datetime, timedelta
+import json
+import logging
 
 # Add src directory to Python path
 script_dir = Path(__file__).parent
@@ -80,67 +79,27 @@ def check_dependencies():
     
     return True
 
-def setup_data_provider():
-    """Setup data provider with fallback"""
-    try:
-        # Try to use existing DataProvider
-        #from src.power_of_3.data.providers.data_provider import DataProvider
-        return DataProvider()
-    except ImportError:
-            logger.error("❌ No data provider available")
-            return None
-
 async def run_single_backtest(args):
     """Run backtest for a single symbol"""
     logger.info(f"🎯 Running single symbol backtest: {args.symbol}")
     
     try:
         from src.power_of_3.backtesting.interface import BacktestInterface
-        from src.power_of_3.config.settings import load_config
         
-        # Load configuration
-        config = load_config()
+        # Initialize backtesting interface (it loads config internally)
+        interface = BacktestInterface(results_dir="backtest_results")
         
-        # Setup data provider
-        data_provider = setup_data_provider()
-        if not data_provider:
-            return False
-        
-        # Initialize backtesting interface
-        results_dir = "backtest_results"  # Define a valid results directory
-        interface = BacktestInterface(config)
-        
-        # Run backtest
+        # Run backtest (saves results automatically)
         results = await interface.run_single_symbol_backtest(
             symbol=args.symbol,
             start_date=args.start,
             end_date=args.end,
-            initial_balance= getattr(args, 'initial_balance', 10000.0),
-            timeframe=getattr(args, 'timeframe', '5min')
-            #min_rr=getattr(args, 'min_rr', 5.0),
-            #max_risk_percent=getattr(args, 'max_risk', 2.0)
+            initial_balance=getattr(args, 'balance', 10000.0),
+            timeframe=getattr(args, 'timeframe', '5min'),
+            save_results=True
         )
         
         if results:
-            # Save results
-            output_dir = Path("backtest_results")
-            output_dir.mkdir(exist_ok=True)
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            base_filename = f"{args.symbol}_{args.start}_{args.end}_{timestamp}"
-            
-            # Save JSON report
-            json_file = output_dir / f"{base_filename}.json"
-            interface.save_results_json(results, json_file)
-            
-            # Save CSV data
-            csv_file = output_dir / f"{base_filename}.csv"
-            interface.save_results_csv(results, csv_file)
-            
-            # Generate markdown report
-            md_file = output_dir / f"{base_filename}.md"
-            interface.generate_markdown_report(results, md_file)
-            
             # Display summary
             print("\n" + "="*60)
             print(f"📊 BACKTEST RESULTS - {args.symbol}")
@@ -148,24 +107,30 @@ async def run_single_backtest(args):
             print(f"Period: {args.start} to {args.end}")
             print(f"Total Trades: {results.total_trades}")
             print(f"Win Rate: {results.win_rate:.1f}%")
-            print(f"Net Profit: ${results.net_profit:.2f}")
-            print(f"Max Drawdown: ${results.max_drawdown:.2f}")
+            print(f"Total Return: {results.total_pnl_pct:.2f}%")
+            print(f"Net P&L: ${results.total_pnl:.2f}")
+            print(f"Max Drawdown: {results.max_drawdown_pct:.2f}%")
             print(f"Sharpe Ratio: {results.sharpe_ratio:.2f}")
             print(f"Profit Factor: {results.profit_factor:.2f}")
-            print(f"\n📁 Results saved to:")
-            print(f"   JSON: {json_file}")
-            print(f"   CSV: {csv_file}")
-            print(f"   Report: {md_file}")
+            print(f"Avg Signal Quality: {results.avg_signal_quality:.1f}/10")
             
             # Generate visualization if requested
             if getattr(args, 'plot', False):
                 try:
-                    plot_file = output_dir / f"{base_filename}_chart.png"
-                    interface.create_equity_curve(results, plot_file)
-                    print(f"   Chart: {plot_file}")
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    base_filename = f"single_{args.symbol}_{timestamp}"
+                    chart_paths = await interface.create_visualizations(
+                        results, 
+                        str(Path("backtest_results") / base_filename)
+                    )
+                    if chart_paths:
+                        print(f"\n📈 Charts created:")
+                        for chart_path in chart_paths:
+                            print(f"   {chart_path}")
                 except Exception as e:
-                    logger.warning(f"Could not generate chart: {e}")
+                    logger.warning(f"Could not generate charts: {e}")
             
+            print(f"\n📁 All results saved to: backtest_results/")
             return True
         else:
             logger.error("❌ Backtest failed to produce results")
@@ -181,41 +146,21 @@ async def run_multi_backtest(args):
     
     try:
         from src.power_of_3.backtesting.interface import BacktestInterface
-        from src.power_of_3.config.settings import load_config
-        
-        # Load configuration
-        config = load_config()
-        
-        # Setup data provider
-        data_provider = setup_data_provider()
-        if not data_provider:
-            return False
         
         # Initialize backtesting interface
-        interface = BacktestInterface(config, data_provider)
+        interface = BacktestInterface(results_dir="backtest_results")
         
-        # Run multi-symbol backtest
+        # Run multi-symbol backtest (saves results automatically)
         results = await interface.run_multi_symbol_backtest(
             symbols=args.symbols,
             start_date=args.start,
             end_date=args.end,
+            initial_balance=getattr(args, 'balance', 10000.0),
             timeframe=getattr(args, 'timeframe', '5min'),
-            min_risk_reward=getattr(args, 'min_rr', 5.0),
-            max_risk_percent=getattr(args, 'max_risk', 2.0)
+            save_results=True
         )
         
         if results:
-            # Save comparison results
-            output_dir = Path("backtest_results")
-            output_dir.mkdir(exist_ok=True)
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            base_filename = f"multi_symbol_{args.start}_{args.end}_{timestamp}"
-            
-            # Save comparison report
-            comparison_file = output_dir / f"{base_filename}_comparison.json"
-            interface.save_comparison_results(results, comparison_file)
-            
             # Display comparison summary
             print("\n" + "="*80)
             print("📊 MULTI-SYMBOL BACKTEST COMPARISON")
@@ -224,24 +169,30 @@ async def run_multi_backtest(args):
             print(f"Symbols: {', '.join(args.symbols)}")
             print("\nPerformance Summary:")
             print("-" * 80)
-            print(f"{'Symbol':<10} {'Trades':<8} {'Win Rate':<10} {'Net P&L':<12} {'Sharpe':<8} {'Max DD':<10}")
+            print(f"{'Symbol':<10} {'Trades':<8} {'Win Rate':<10} {'Return':<10} {'Sharpe':<8} {'Max DD':<10}")
             print("-" * 80)
             
             for symbol, result in results.items():
                 print(f"{symbol:<10} {result.total_trades:<8} {result.win_rate:<10.1f}% "
-                      f"${result.net_profit:<11.2f} {result.sharpe_ratio:<8.2f} ${result.max_drawdown:<10.2f}")
-            
-            print(f"\n📁 Comparison results saved to: {comparison_file}")
+                      f"{result.total_pnl_pct:<9.2f}% {result.sharpe_ratio:<8.2f} {result.max_drawdown_pct:<9.2f}%")
             
             # Generate comparison chart if requested
             if getattr(args, 'plot', False):
                 try:
-                    chart_file = output_dir / f"{base_filename}_comparison.png"
-                    interface.create_comparison_chart(results, chart_file)
-                    print(f"📈 Comparison chart: {chart_file}")
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    base_filename = f"multi_symbol_{timestamp}"
+                    chart_paths = await interface.create_visualizations(
+                        results, 
+                        str(Path("backtest_results") / base_filename)
+                    )
+                    if chart_paths:
+                        print(f"\n📈 Comparison charts created:")
+                        for chart_path in chart_paths:
+                            print(f"   {chart_path}")
                 except Exception as e:
-                    logger.warning(f"Could not generate comparison chart: {e}")
+                    logger.warning(f"Could not generate comparison charts: {e}")
             
+            print(f"\n📁 All results saved to: backtest_results/")
             return True
         else:
             logger.error("❌ Multi-symbol backtest failed")
@@ -257,76 +208,61 @@ async def run_optimization(args):
     
     try:
         from src.power_of_3.backtesting.interface import BacktestInterface
-        from src.power_of_3.config.settings import load_config
-        
-        # Load configuration
-        config = load_config()
-        
-        # Setup data provider
-        data_provider = setup_data_provider()
-        if not data_provider:
-            return False
         
         # Initialize backtesting interface
-        interface = BacktestInterface(config, data_provider)
+        interface = BacktestInterface(results_dir="backtest_results")
         
         # Define optimization parameters
-        risk_reward_values = getattr(args, 'rr_values', [3.0, 4.0, 5.0, 6.0, 7.0])
-        risk_percent_values = getattr(args, 'risk_values', [1.0, 1.5, 2.0, 2.5])
+        parameter_ranges = {
+            'min_risk_reward': getattr(args, 'rr_values', [3.0, 4.0, 5.0, 6.0, 7.0]),
+            'max_risk_percent': getattr(args, 'risk_values', [1.0, 1.5, 2.0, 2.5])
+        }
         
-        # Run optimization
+        # Run optimization (saves results automatically)
         optimization_results = await interface.run_parameter_optimization(
             symbol=args.symbol,
             start_date=args.start,
             end_date=args.end,
-            risk_reward_values=risk_reward_values,
-            risk_percent_values=risk_percent_values,
+            parameter_ranges=parameter_ranges,
+            initial_balance=getattr(args, 'balance', 10000.0),
             timeframe=getattr(args, 'timeframe', '5min')
         )
         
-        if optimization_results:
-            # Save optimization results
-            output_dir = Path("backtest_results")
-            output_dir.mkdir(exist_ok=True)
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            opt_file = output_dir / f"{args.symbol}_optimization_{timestamp}.json"
-            
-            interface.save_optimization_results(optimization_results, opt_file)
-            
+        if optimization_results and optimization_results.get('all_results'):
             # Display optimization summary
             print("\n" + "="*80)
             print(f"🔧 PARAMETER OPTIMIZATION RESULTS - {args.symbol}")
             print("="*80)
             print(f"Period: {args.start} to {args.end}")
+            print(f"Total combinations tested: {optimization_results['total_tested']}")
+            
+            if optimization_results['best_parameters']:
+                best = optimization_results['best_parameters']
+                print(f"\n🏆 BEST PARAMETERS:")
+                print(f"   Min Risk/Reward Ratio: {best['min_risk_reward']}")
+                print(f"   Max Risk Percentage: {best['max_risk_percent']}%")
+                print(f"   Total Return: {best['total_return']:.2f}%")
+                print(f"   Win Rate: {best['win_rate']:.1f}%")
+                print(f"   Sharpe Ratio: {best['sharpe_ratio']:.2f}")
+                print(f"   Max Drawdown: {best['max_drawdown']:.2f}%")
+                print(f"   Optimization Score: {best['score']:.3f}")
+            
             print("\nTop 5 Parameter Combinations:")
             print("-" * 80)
-            print(f"{'RR Ratio':<10} {'Risk %':<8} {'Net P&L':<12} {'Win Rate':<10} {'Sharpe':<8} {'Trades':<8}")
+            print(f"{'RR Ratio':<10} {'Risk %':<8} {'Return %':<10} {'Win Rate':<10} {'Sharpe':<8} {'Score':<8}")
             print("-" * 80)
             
-            # Sort by net profit and show top 5
-            sorted_results = sorted(optimization_results.items(), 
-                                  key=lambda x: x[1].net_profit, reverse=True)
+            # Show top 5 results
+            all_results = optimization_results['all_results']
+            for i, result in enumerate(all_results[:5]):
+                print(f"{result['min_risk_reward']:<10.1f} {result['max_risk_percent']:<8.1f}% "
+                      f"{result['total_return']:<9.2f}% {result['win_rate']:<9.1f}% "
+                      f"{result['sharpe_ratio']:<8.2f} {result['score']:<8.3f}")
             
-            for i, (params, result) in enumerate(sorted_results[:5]):
-                rr, risk = params
-                print(f"{rr:<10.1f} {risk:<8.1f}% ${result.net_profit:<11.2f} "
-                      f"{result.win_rate:<10.1f}% {result.sharpe_ratio:<8.2f} {result.total_trades:<8}")
-            
-            print(f"\n📁 Full optimization results saved to: {opt_file}")
-            
-            # Generate optimization heatmap if requested
-            if getattr(args, 'plot', False):
-                try:
-                    heatmap_file = output_dir / f"{args.symbol}_optimization_heatmap_{timestamp}.png"
-                    interface.create_optimization_heatmap(optimization_results, heatmap_file)
-                    print(f"🔥 Optimization heatmap: {heatmap_file}")
-                except Exception as e:
-                    logger.warning(f"Could not generate heatmap: {e}")
-            
+            print(f"\n📁 Full optimization results saved to: backtest_results/")
             return True
         else:
-            logger.error("❌ Parameter optimization failed")
+            logger.error("❌ Parameter optimization failed or produced no results")
             return False
             
     except Exception as e:
@@ -347,9 +283,8 @@ async def run_quick_test(args):
             self.symbol = symbol
             self.start = start_date
             self.end = end_date
-            self.timeframe = '5min'
-            self.min_rr = 5.0
-            self.max_risk = 2.0
+            self.timeframe = '1H'
+            self.balance = 10000.0
             self.plot = True
     
     quick_args = QuickArgs(args.symbol)
@@ -368,10 +303,10 @@ Examples:
   python run_backtest.py quick --symbol US30
   
   # Single symbol backtest
-  python run_backtest.py single --symbol US30 --start 2024-01-01 --end 2024-03-31
+  python run_backtest.py single --symbol US30 --start 2024-01-01 --end 2024-03-31 --plot
   
   # Multi-symbol comparison  
-  python run_backtest.py multi --symbols US30 NAS100 SPX500 --start 2024-01-01 --end 2024-03-31
+  python run_backtest.py multi --symbols US30 NAS100 SPX500 --start 2024-01-01 --end 2024-03-31 --plot
   
   # Parameter optimization
   python run_backtest.py optimize --symbol US30 --start 2024-01-01 --end 2024-03-31 --plot
@@ -396,10 +331,8 @@ Examples:
     single_parser.add_argument('--timeframe', default='5min', 
                               choices=['1min', '5min', '15min', '1h'],
                               help='Timeframe (default: 5min)')
-    single_parser.add_argument('--min-rr', type=float, default=5.0,
-                              help='Minimum risk-reward ratio (default: 5.0)')
-    single_parser.add_argument('--max-risk', type=float, default=2.0,
-                              help='Maximum risk percentage (default: 2.0)')
+    single_parser.add_argument('--balance', type=float, default=10000.0,
+                              help='Initial account balance (default: 10000)')
     single_parser.add_argument('--plot', action='store_true',
                               help='Generate charts')
     
@@ -413,10 +346,8 @@ Examples:
     multi_parser.add_argument('--timeframe', default='5min',
                              choices=['1min', '5min', '15min', '1h'],
                              help='Timeframe (default: 5min)')
-    multi_parser.add_argument('--min-rr', type=float, default=5.0,
-                             help='Minimum risk-reward ratio (default: 5.0)')
-    multi_parser.add_argument('--max-risk', type=float, default=2.0,
-                             help='Maximum risk percentage (default: 2.0)')
+    multi_parser.add_argument('--balance', type=float, default=10000.0,
+                             help='Initial account balance (default: 10000)')
     multi_parser.add_argument('--plot', action='store_true',
                              help='Generate comparison charts')
     
@@ -430,6 +361,8 @@ Examples:
     opt_parser.add_argument('--timeframe', default='5min',
                            choices=['1min', '5min', '15min', '1h'],
                            help='Timeframe (default: 5min)')
+    opt_parser.add_argument('--balance', type=float, default=10000.0,
+                           help='Initial account balance (default: 10000)')
     opt_parser.add_argument('--rr-values', nargs='+', type=float,
                            default=[3.0, 4.0, 5.0, 6.0, 7.0],
                            help='Risk-reward ratios to test (default: 3 4 5 6 7)')
@@ -437,7 +370,7 @@ Examples:
                            default=[1.0, 1.5, 2.0, 2.5],
                            help='Risk percentages to test (default: 1 1.5 2 2.5)')
     opt_parser.add_argument('--plot', action='store_true',
-                           help='Generate optimization heatmap')
+                           help='Generate optimization visualizations')
     
     return parser
 

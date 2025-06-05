@@ -780,6 +780,26 @@ Examples:
             print(f"❌ Error: {e}")
             logger.error(f"CLI error: {e}")
             sys.exit(1)
+            
+    def _standardize_data_columns(self, df):
+        """Standardize column names for compatibility"""
+        if df.empty:
+            return df
+            
+        column_mapping = {
+            'Open': 'open', 
+            'High': 'high', 
+            'Low': 'low', 
+            'Close': 'close', 
+            'Volume': 'volume'
+        }
+        
+        columns_to_rename = {old: new for old, new in column_mapping.items() if old in df.columns}
+        if columns_to_rename:
+            df = df.rename(columns=columns_to_rename)
+            logger.info(f"Standardized columns: {list(columns_to_rename.keys())}")
+        
+        return df
 
 # Entry point for module execution
 if __name__ == "__main__":

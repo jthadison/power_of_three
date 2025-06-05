@@ -13,6 +13,8 @@ Features:
 - Historical analysis queries
 """
 
+from pathlib import Path
+import sys
 import psycopg2
 import pandas as pd
 from sqlalchemy import create_engine, text
@@ -23,14 +25,20 @@ import logging
 import os
 from dataclasses import asdict
 import uuid
-from power_of_3_signal_generator import TradingSession
+#from power_of_3_signal_generator import TradingSession
+from src.power_of_3.core.types import TradingSession, PowerOf3Signal, SignalType, SignalQuality
 
+script_dir = Path(__file__).parent
+src_dir = script_dir / "src"
+if src_dir.exists():
+    sys.path.insert(0, str(src_dir))
+    
 # Import Power of 3 classes (if available)
 try:
-    from power_of_3_signal_generator import (
-        PowerOf3Signal, ManipulationPattern, LiquidityZone, 
-        TradingSession, SignalType, SignalQuality
-    )
+    # from power_of_3_signal_generator import (
+    #     PowerOf3Signal, ManipulationPattern, LiquidityZone, 
+    #     TradingSession, SignalType, SignalQuality
+    # )
     POWER_OF_3_AVAILABLE = True
 except ImportError:
     POWER_OF_3_AVAILABLE = False

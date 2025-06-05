@@ -9,11 +9,23 @@ from typing import List, Optional
 import pandas as pd
 import pytz
 
-#from power_of_3_signal_generator import PowerOf3Signal
-from src.power_of_3.core.types import LiquidityZone, ManipulationPattern, PowerOf3Phase, PowerOf3Signal, SignalQuality, SignalType, TradingSession
-from src.power_of_3.core.liquidity_zones import LiquidityZoneDetector  # Import LiquidityAnalyzer
-from src.power_of_3.core.session_detector import SessionDetector
+from src.power_of_3.core.liquidity_zones import (
+    LiquidityZoneDetector,  # Import LiquidityAnalyzer
+)
 from src.power_of_3.core.manipulation_detector import ManipulationDetector
+from src.power_of_3.core.session_detector import SessionDetector
+
+#from power_of_3_signal_generator import PowerOf3Signal
+from src.power_of_3.core.types import (
+    LiquidityZone,
+    ManipulationPattern,
+    PowerOf3Phase,
+    PowerOf3Signal,
+    SignalQuality,
+    SignalType,
+    TradingSession,
+)
+
 
 class PowerOf3SignalGenerator:
     """Main Power of 3 signal generation engine"""
@@ -47,9 +59,7 @@ class PowerOf3SignalGenerator:
             return signals
         
         # Step 1: Identify liquidity zones
-        liquidity_zones_raw = self.liquidity_analyzer.identify_liquidity_zones(
-            df
-        )
+        liquidity_zones_raw = self.liquidity_analyzer.identify_liquidity_zones(df, current_session)
         liquidity_zones = [LiquidityZone(**zone) for zone in liquidity_zones_raw]
         
         # Step 2: Detect manipulation patterns

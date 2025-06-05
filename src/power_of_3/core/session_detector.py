@@ -4,11 +4,13 @@ Session Detection Module for Power of 3 Trading System
 Handles London Kill Zone, NY Kill Zone, and session timing logic.
 """
 
-import pytz
 from datetime import datetime, time
 from typing import Dict, Optional
 
+import pytz
+
 from src.power_of_3.core.types import PowerOf3Phase, TradingSession
+
 
 class SessionDetector:
     """Detects trading sessions and timing for Power of 3 methodology"""

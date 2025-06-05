@@ -45,37 +45,40 @@ The system detects:
 - High-probability entry points with 1:5+ risk-reward ratios
 """
 
-import os
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-import pytz
-from typing import Dict, List, Optional, Tuple, Union
 import asyncio
 import logging
-from dataclasses import dataclass
-from enum import Enum
+import os
 import time
-import json
-import aiohttp
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Dict, List, Optional
 
-# CrewAI imports
-from crewai import Agent, Task, Crew, Process
-from crewai.tools import BaseTool
-from langchain.tools import Tool
-from langchain_openai import ChatOpenAI
+import aiohttp
+import pandas as pd
+import pytz
 
 # Data and trading imports
 import yfinance as yf
-#import pandas_ta as ta
-import psycopg2
-from sqlalchemy import create_engine
-import smtplib
-from email.mime.text import MIMEText
-import requests
-from power_of_3_signal_generator import PowerOf3SignalGenerator, TradingSession, SignalFormatter
 
+# CrewAI imports
+from crewai import Agent, Crew, Process, Task
+from crewai.tools import BaseTool
 from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+# from power_of_3_signal_generator import (
+#     PowerOf3SignalGenerator,
+#     SignalFormatter,
+#     TradingSession,
+# )
+
+#import pandas_ta as ta
+from sqlalchemy import create_engine
+
+from src.power_of_3.core.signal_generator import PowerOf3SignalGenerator
+from src.power_of_3.core.types import LiquidityZone, TradingSession
+from src.power_of_3.database.repository import POWER_OF_3_AVAILABLE
+from src.power_of_3.utils.signal_formatter import SignalFormatter
 
 load_dotenv()  # Load environment variables from .env file
 
@@ -799,26 +802,27 @@ class TechnicalAnalysis:
         """Identify key liquidity zones where stops are likely clustered"""
         liquidity_zones = []
         
-        # Previous day high/low
-        daily_high = df['High'].rolling(24).max()
-        daily_low = df['Low'].rolling(24).min()
+        # FIXED: Changed from df['High'] to df['high']
+        daily_high = df['high'].rolling(24).max()
+        daily_low = df['low'].rolling(24).min()
         
-        # Swing highs and lows
-        swing_highs = df['High'][(df['High'].shift(1) < df['High']) & 
-                                (df['High'].shift(-1) < df['High'])]
-        swing_lows = df['Low'][(df['Low'].shift(1) > df['Low']) & 
-                              (df['Low'].shift(-1) > df['Low'])]
+        # FIXED: Changed column names to lowercase
+        swing_highs = df['high'][(df['high'].shift(1) < df['high']) & 
+                                (df['high'].shift(-1) < df['high'])]
+        swing_lows = df['low'][(df['low'].shift(1) > df['low']) & 
+                              (df['low'].shift(-1) > df['low'])]
         
-        # Weekly/Monthly levels
-        weekly_high = df['High'].rolling(168).max()  # 7 days * 24 hours
-        weekly_low = df['Low'].rolling(168).min()
+        # FIXED: Changed column names to lowercase
+        weekly_high = df['high'].rolling(168).max()  # 7 days * 24 hours
+        weekly_low = df['low'].rolling(168).min()
         
         # Add significant levels
         for i in range(len(df)):
             if i < lookback:
                 continue
                 
-            current_price = df['Close'].iloc[i]
+            # FIXED: Changed from df['Close'] to df['close']
+            current_price = df['close'].iloc[i]
             
             # Check for liquidity zones
             levels = [
@@ -846,8 +850,9 @@ class TechnicalAnalysis:
         lookback = min(current_idx, 50)
         
         for i in range(current_idx - lookback, current_idx):
-            if abs(df['High'].iloc[i] - level) / level < 0.001 or \
-               abs(df['Low'].iloc[i] - level) / level < 0.001:
+            # FIXED: Changed from df['High'] and df['Low'] to lowercase
+            if abs(df['high'].iloc[i] - level) / level < 0.001 or \
+               abs(df['low'].iloc[i] - level) / level < 0.001:
                 touches += 1
         
         return min(touches / 5.0, 1.0)  # Normalize to 0-1
@@ -863,15 +868,15 @@ class TechnicalAnalysis:
         swing_lows = []
         
         for i in range(lookback, len(df) - lookback):
-            # Swing high
-            if all(df['High'].iloc[i] > df['High'].iloc[i-j] for j in range(1, lookback+1)) and \
-               all(df['High'].iloc[i] > df['High'].iloc[i+j] for j in range(1, lookback+1)):
-                swing_highs.append((i, df['High'].iloc[i]))
+            # FIXED: Changed from df['High'] to df['high']
+            if all(df['high'].iloc[i] > df['high'].iloc[i-j] for j in range(1, lookback+1)) and \
+               all(df['high'].iloc[i] > df['high'].iloc[i+j] for j in range(1, lookback+1)):
+                swing_highs.append((i, df['high'].iloc[i]))
             
-            # Swing low
-            if all(df['Low'].iloc[i] < df['Low'].iloc[i-j] for j in range(1, lookback+1)) and \
-               all(df['Low'].iloc[i] < df['Low'].iloc[i+j] for j in range(1, lookback+1)):
-                swing_lows.append((i, df['Low'].iloc[i]))
+            # FIXED: Changed from df['Low'] to df['low']
+            if all(df['low'].iloc[i] < df['low'].iloc[i-j] for j in range(1, lookback+1)) and \
+               all(df['low'].iloc[i] < df['low'].iloc[i+j] for j in range(1, lookback+1)):
+                swing_lows.append((i, df['low'].iloc[i]))
         
         # Analyze trend
         higher_high = False
@@ -914,31 +919,32 @@ class TechnicalAnalysis:
             candle = df.iloc[i]
             prev_candle = df.iloc[i-1]
             
-            # Calculate candle properties
-            body_size = abs(candle['Close'] - candle['Open'])
-            total_size = candle['High'] - candle['Low']
+            # FIXED: Changed all column names to lowercase
+            body_size = abs(candle['close'] - candle['open'])
+            total_size = candle['high'] - candle['low']
             body_pct = body_size / total_size if total_size > 0 else 0
             
-            # Volume surge (if available)
+            # Volume surge (if available) - FIXED: Changed from 'Volume' to 'volume'
+            avg_volume = 1  # Default value to avoid unbound error
             volume_surge = False
-            avg_volume = df['Volume'].rolling(20).mean().iloc[i] if 'Volume' in df.columns else 1.0
-            if 'Volume' in df.columns:
-                avg_volume = df['Volume'].rolling(20).mean().iloc[i]
-                volume_surge = candle['Volume'] > avg_volume * 1.5
+            if 'volume' in df.columns:
+                avg_volume = df['volume'].rolling(20).mean().iloc[i]
+                volume_surge = candle['volume'] > avg_volume * 1.5
             
             # Large body candle with volume
             if body_pct > min_body_pct and volume_surge:
-                order_block_type = 'bullish' if candle['Close'] > candle['Open'] else 'bearish'
+                order_block_type = 'bullish' if candle['close'] > candle['open'] else 'bearish'
                 
                 order_blocks.append({
                     'timestamp': df.index[i],
                     'type': order_block_type,
-                    'high': candle['High'],
-                    'low': candle['Low'],
-                    'open': candle['Open'],
-                    'close': candle['Close'],
+                    # FIXED: All column names to lowercase
+                    'high': candle['high'],
+                    'low': candle['low'],
+                    'open': candle['open'],
+                    'close': candle['close'],
                     'strength': body_pct,
-                    'volume_ratio': candle.get('Volume', 0) / (avg_volume if 'Volume' in df.columns else 1.0)
+                    'volume_ratio': candle.get('volume', 0) / avg_volume if 'volume' in df.columns else 1.0
                 })
         
         return order_blocks[-10:]  # Return last 10 order blocks
@@ -956,16 +962,144 @@ class TechnicalAnalysis:
             current = recent_candles.iloc[i]
             prev = recent_candles.iloc[i-1]
             
-            # Significant move up then down (or vice versa)
-            move_up = (current['High'] - prev['Close']) / prev['Close']
-            move_down = (prev['Close'] - current['Low']) / prev['Close']
+            # FIXED: Changed column names to lowercase
+            move_up = (current['high'] - prev['close']) / prev['close']
+            move_down = (prev['close'] - current['low']) / prev['close']
             
-            if move_up > threshold and current['Close'] < current['Open']:
+            if move_up > threshold and current['close'] < current['open']:
                 return True  # Spike up then close lower
-            if move_down > threshold and current['Close'] > current['Open']:
+            if move_down > threshold and current['close'] > current['open']:
                 return True  # Spike down then close higher
         
         return False
+    
+    # @staticmethod
+    # def _calculate_level_strength(df: pd.DataFrame, level: float, current_idx: int) -> float:
+    #     """Calculate strength of a support/resistance level"""
+    #     touches = 0
+    #     lookback = min(current_idx, 50)
+        
+    #     for i in range(current_idx - lookback, current_idx):
+    #         if abs(df['High'].iloc[i] - level) / level < 0.001 or \
+    #            abs(df['Low'].iloc[i] - level) / level < 0.001:
+    #             touches += 1
+        
+    #     return min(touches / 5.0, 1.0)  # Normalize to 0-1
+    
+    # @staticmethod
+    # def identify_market_structure_break(df: pd.DataFrame, lookback: int = 10) -> MarketStructure:
+    #     """Identify market structure breaks and trend changes"""
+    #     if len(df) < lookback * 2:
+    #         return MarketStructure("", False, False, MarketDirection.NEUTRAL, [], [], False)
+        
+    #     # Calculate swing points
+    #     swing_highs = []
+    #     swing_lows = []
+        
+    #     for i in range(lookback, len(df) - lookback):
+    #         # Swing high
+    #         if all(df['High'].iloc[i] > df['High'].iloc[i-j] for j in range(1, lookback+1)) and \
+    #            all(df['High'].iloc[i] > df['High'].iloc[i+j] for j in range(1, lookback+1)):
+    #             swing_highs.append((i, df['High'].iloc[i]))
+            
+    #         # Swing low
+    #         if all(df['Low'].iloc[i] < df['Low'].iloc[i-j] for j in range(1, lookback+1)) and \
+    #            all(df['Low'].iloc[i] < df['Low'].iloc[i+j] for j in range(1, lookback+1)):
+    #             swing_lows.append((i, df['Low'].iloc[i]))
+        
+    #     # Analyze trend
+    #     higher_high = False
+    #     higher_low = False
+    #     trend_direction = MarketDirection.NEUTRAL
+        
+    #     if len(swing_highs) >= 2:
+    #         higher_high = swing_highs[-1][1] > swing_highs[-2][1]
+        
+    #     if len(swing_lows) >= 2:
+    #         higher_low = swing_lows[-1][1] > swing_lows[-2][1]
+        
+    #     if higher_high and higher_low:
+    #         trend_direction = MarketDirection.BULLISH
+    #     elif not higher_high and not higher_low:
+    #         trend_direction = MarketDirection.BEARISH
+        
+    #     # Identify order blocks
+    #     order_blocks = TechnicalAnalysis.identify_order_blocks(df)
+        
+    #     # Detect manipulation
+    #     manipulation_detected = TechnicalAnalysis.detect_manipulation(df)
+        
+    #     return MarketStructure(
+    #         symbol="",
+    #         higher_high=higher_high,
+    #         higher_low=higher_low,
+    #         trend_direction=trend_direction,
+    #         liquidity_zones=TechnicalAnalysis.identify_liquidity_zones(df),
+    #         order_blocks=order_blocks,
+    #         manipulation_detected=manipulation_detected
+    #     )
+    
+    # @staticmethod
+    # def identify_order_blocks(df: pd.DataFrame, min_body_pct: float = 0.7) -> List[Dict]:
+    #     """Identify institutional order blocks"""
+    #     order_blocks = []
+        
+    #     for i in range(1, len(df)):
+    #         candle = df.iloc[i]
+    #         prev_candle = df.iloc[i-1]
+            
+    #         # Calculate candle properties
+    #         body_size = abs(candle['Close'] - candle['Open'])
+    #         total_size = candle['High'] - candle['Low']
+    #         body_pct = body_size / total_size if total_size > 0 else 0
+            
+    #         # Volume surge (if available)
+    #         volume_surge = False
+    #         avg_volume = df['Volume'].rolling(20).mean().iloc[i] if 'Volume' in df.columns else 1.0
+    #         if 'Volume' in df.columns:
+    #             avg_volume = df['Volume'].rolling(20).mean().iloc[i]
+    #             volume_surge = candle['Volume'] > avg_volume * 1.5
+            
+    #         # Large body candle with volume
+    #         if body_pct > min_body_pct and volume_surge:
+    #             order_block_type = 'bullish' if candle['Close'] > candle['Open'] else 'bearish'
+                
+    #             order_blocks.append({
+    #                 'timestamp': df.index[i],
+    #                 'type': order_block_type,
+    #                 'high': candle['High'],
+    #                 'low': candle['Low'],
+    #                 'open': candle['Open'],
+    #                 'close': candle['Close'],
+    #                 'strength': body_pct,
+    #                 'volume_ratio': candle.get('Volume', 0) / (avg_volume if 'Volume' in df.columns else 1.0)
+    #             })
+        
+    #     return order_blocks[-10:]  # Return last 10 order blocks
+    
+    # @staticmethod
+    # def detect_manipulation(df: pd.DataFrame, threshold: float = 0.002) -> bool:
+    #     """Detect potential manipulation moves"""
+    #     if len(df) < 5:
+    #         return False
+        
+    #     recent_candles = df.tail(5)
+        
+    #     # Look for quick spikes followed by reversals
+    #     for i in range(1, len(recent_candles)):
+    #         current = recent_candles.iloc[i]
+    #         prev = recent_candles.iloc[i-1]
+            
+    #         # Significant move up then down (or vice versa)
+    #         move_up = (current['High'] - prev['Close']) / prev['Close']
+    #         move_down = (prev['Close'] - current['Low']) / prev['Close']
+            
+    #         if move_up > threshold and current['Close'] < current['Open']:
+    #             return True  # Spike up then close lower
+    #         if move_down > threshold and current['Close'] > current['Open']:
+    #             return True  # Spike down then close higher
+        
+    #     return False
 
 # =============================================================================
 # SESSION MANAGEMENT
@@ -1116,20 +1250,27 @@ class TechnicalAnalysisTool(BaseTool):
                 if df.empty:
                     return f"No data available for technical analysis of {symbol}"
                 
+                # FIXED: Standardize column names IMMEDIATELY after fetching
+                column_mapping = {
+                    'Open': 'open', 'High': 'high', 'Low': 'low', 
+                    'Close': 'close', 'Volume': 'volume'
+                }
+                df = df.rename(columns=column_mapping)
+                
                 # Perform technical analysis using our algorithms
                 market_structure = TechnicalAnalysis.identify_market_structure_break(df)
                 liquidity_zones = TechnicalAnalysis.identify_liquidity_zones(df)
                 order_blocks = TechnicalAnalysis.identify_order_blocks(df)
                 manipulation_detected = TechnicalAnalysis.detect_manipulation(df)
                 
-                # Current price analysis
+                # Current price analysis - FIXED: Use lowercase columns
                 latest = df.tail(1).iloc[0]
                 previous = df.tail(2).iloc[0] if len(df) > 1 else latest
-                price_change = latest['Close'] - previous['Close']
-                price_change_pct = (price_change / previous['Close']) * 100
+                price_change = latest['close'] - previous['close']
+                price_change_pct = (price_change / previous['close']) * 100
                 
                 # Find nearby liquidity zones
-                current_price = latest['Close']
+                current_price = latest['close']
                 nearby_zones = []
                 for zone in liquidity_zones[-10:]:  # Last 10 zones
                     if 'level' in zone:
@@ -1145,17 +1286,17 @@ class TechnicalAnalysisTool(BaseTool):
                 # Recent order blocks
                 recent_blocks = order_blocks[-3:] if order_blocks else []
                 
-                # Calculate basic trend
-                sma_20 = df['Close'].rolling(20).mean().iloc[-1] if len(df) >= 20 else latest['Close']
-                trend_bias = "BULLISH" if latest['Close'] > sma_20 else "BEARISH"
+                # Calculate basic trend - FIXED: Use lowercase columns
+                sma_20 = df['close'].rolling(20).mean().iloc[-1] if len(df) >= 20 else latest['close']
+                trend_bias = "BULLISH" if latest['close'] > sma_20 else "BEARISH"
                 
                 analysis = f"""Technical Analysis for {symbol} ({timeframe}):
 
 === PRICE ACTION ===
-Current Price: {latest['Close']:.2f}
+Current Price: {latest['close']:.2f}
 Price Change: {price_change:+.2f} ({price_change_pct:+.2f}%)
-High: {latest['High']:.2f}
-Low: {latest['Low']:.2f}
+High: {latest['high']:.2f}
+Low: {latest['low']:.2f}
 20-SMA: {sma_20:.2f}
 
 === MARKET STRUCTURE ===
@@ -1197,63 +1338,10 @@ Nearby Zones (within 3%): {len(nearby_zones)}"""
             except Exception as yf_error:
                 # Fallback analysis with sample data
                 return f"""Technical Analysis for {symbol} (SAMPLE ANALYSIS):
-
-=== PRICE ACTION ===
-Current Price: 2100.50
-Price Change: +15.25 (+0.73%)
-High: 2105.75
-Low: 2095.30
-
-=== MARKET STRUCTURE ===
-Trend Direction: BULLISH
-Higher Highs: True
-Higher Lows: True
-Structure Break: NO
-
-=== INSTITUTIONAL ACTIVITY ===
-Manipulation Detected: False
-Total Order Blocks: 3
-Recent Order Blocks: 1
-
-=== LIQUIDITY ANALYSIS ===
-Total Liquidity Zones: 5
-Nearby Zones: 2
-
-=== POWER OF 3 ASSESSMENT ===
-Manipulation Evidence: WEAK
-Liquidity Hunt Potential: MEDIUM
-Institutional Interest: MEDIUM
-
-Note: Sample analysis - Yahoo Finance unavailable: {str(yf_error)}"""
+Note: Yahoo Finance unavailable: {str(yf_error)}"""
                 
         except Exception as e:
             return f"Error in technical analysis for {symbol}: {str(e)}"
-
-# Import the Power of 3 Signal Generator
-# NOTE: Save the Power of 3 Signal Generator artifact as 'power_of_3_signal_generator.py' 
-# in the same directory as this file for the imports to work
-try:
-    from power_of_3_signal_generator import (
-        PowerOf3SignalGenerator, SignalFormatter, TradingSession,
-        SignalType, SignalQuality, PowerOf3Signal
-    )
-    POWER_OF_3_AVAILABLE = True
-except ImportError:
-    print("⚠ Power of 3 Signal Generator not found. Save the signal generator artifact as 'power_of_3_signal_generator.py'")
-    POWER_OF_3_AVAILABLE = False
-    
-    # Create dummy classes to prevent import errors
-    # class TradingSession:
-    #     NEW_YORK_OPEN = "new_york_open"
-    
-    # class SignalFormatter:
-    #     @staticmethod
-    #     def format_signal_for_display(signal):
-    #         return str(signal)
-        
-    #     @staticmethod
-    #     def format_signal_summary(signals):
-    #         return f"Found {len(signals)} signals"
 
 class PowerOf3SignalTool(BaseTool):
     name: str = "power_of_3_signal_tool"
@@ -1339,7 +1427,8 @@ Account Size: ${account_balance:,.2f}"""
                 )
                 
                 manipulation_patterns = signal_generator.manipulation_detector.detect_manipulation_patterns(
-                    df, current_session or TradingSession.NEW_YORK_OPEN, liquidity_zones
+                    df, current_session or TradingSession.NEW_YORK_OPEN, 
+                    [LiquidityZone(**zone) for zone in liquidity_zones]
                 )
                 
                 market_structure = signal_generator._analyze_market_structure(df)
@@ -2056,7 +2145,7 @@ class PowerOf3TradingSystem:
             signal_tool = PowerOf3SignalTool()
             
             # Get the actual signal objects (not just formatted text)
-            from power_of_3_signal_generator import PowerOf3SignalGenerator
+            # from power_of_3_signal_generator import PowerOf3SignalGenerator
             import yfinance as yf
             
             # Get data

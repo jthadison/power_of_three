@@ -4,6 +4,7 @@
 
 from datetime import datetime
 from typing import List
+
 import pandas as pd
 
 from src.power_of_3.core.types import LiquidityZone, ManipulationPattern, TradingSession
@@ -58,9 +59,9 @@ class ManipulationDetector:
                 
                 # Check for sweep above resistance
                 if (zone.zone_type == 'resistance' and 
-                    current_bar['High'] > zone.level and
+                    current_bar['high'] > zone.level and
                     current_bar['Close'] < zone.level and
-                    previous_bar['High'] <= zone.level):
+                    previous_bar['high'] <= zone.level):
                     
                     # Confirm it's a manipulation (quick move back below)
                     reversal_strength = (zone.level - current_bar['Close']) / zone.level
@@ -120,19 +121,19 @@ class ManipulationDetector:
             # Look for strong moves followed by immediate reversals
             
             # Upside fake breakout
-            if (current_bar['High'] > prev_bar['High'] and
-                prev_bar['High'] > prev_prev_bar['High'] and
+            if (current_bar['high'] > prev_bar['high'] and
+                prev_bar['high'] > prev_prev_bar['high'] and
                 current_bar['Close'] < prev_bar['Open']):
                 
-                breakout_size = (current_bar['High'] - prev_prev_bar['High']) / prev_prev_bar['High']
-                reversal_size = (current_bar['High'] - current_bar['Close']) / current_bar['High']
+                breakout_size = (current_bar['high'] - prev_prev_bar['high']) / prev_prev_bar['high']
+                reversal_size = (current_bar['high'] - current_bar['Close']) / current_bar['high']
                 
                 if breakout_size >= 0.003 and reversal_size >= 0.004:  # Significant move and reversal
                     patterns.append(ManipulationPattern(
                         pattern_type='fake_breakout',
                         start_time=pd.to_datetime(str(prev_prev_bar.name)) if not isinstance(prev_prev_bar.name, datetime) else prev_prev_bar.name,
                         end_time=pd.to_datetime(str(current_bar.name)) if not isinstance(current_bar.name, datetime) else current_bar.name,
-                        trigger_level=current_bar['High'],
+                        trigger_level=current_bar['high'],
                         reversal_level=current_bar['Close'],
                         strength=min((reversal_size + breakout_size) * 50, 1.0),
                         volume_surge=ManipulationDetector._check_volume_surge(recent_data, i),
@@ -173,7 +174,7 @@ class ManipulationDetector:
             
             # Calculate wick sizes relative to body
             body_size = abs(current_bar['Close'] - current_bar['Open'])
-            upper_wick = current_bar['High'] - max(current_bar['Open'], current_bar['Close'])
+            upper_wick = current_bar['high'] - max(current_bar['Open'], current_bar['Close'])
             lower_wick = min(current_bar['Open'], current_bar['Close']) - current_bar['Low']
             
             # Look for long wicks (>3x body size) indicating rejections
@@ -184,13 +185,13 @@ class ManipulationDetector:
                 # Upper wick rejection (bearish)
                 if (upper_wick_ratio >= 3.0 and 
                     current_bar['Close'] < current_bar['Open'] and
-                    upper_wick / current_bar['High'] >= 0.4):  # Wick is 40%+ of high
+                    upper_wick / current_bar['high'] >= 0.4):  # Wick is 40%+ of high
                     
                     patterns.append(ManipulationPattern(
                         pattern_type='stop_hunt',
                         start_time=pd.to_datetime(str(current_bar.name)) if not isinstance(current_bar.name, datetime) else current_bar.name,
                         end_time=pd.to_datetime(str(current_bar.name)) if not isinstance(current_bar.name, datetime) else current_bar.name,
-                        trigger_level=current_bar['High'],
+                        trigger_level=current_bar['high'],
                         reversal_level=current_bar['Close'],
                         strength=min(upper_wick_ratio * 0.2, 1.0),
                         volume_surge=ManipulationDetector._check_volume_surge(recent_data, i),

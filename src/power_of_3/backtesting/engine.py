@@ -9,21 +9,26 @@ Backtesting engine that integrates with your existing architecture.
 File Location: src/power_of_3/backtesting/engine.py
 """
 
-import pandas as pd
-import numpy as np
+import asyncio
+import logging
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-import logging
-from dataclasses import dataclass, asdict
-import asyncio
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+
+from src.power_of_3.data.providers.data_provider import DataProvider
+
+from ..config.settings import load_config
+from ..core.signal_generator import PowerOf3SignalGenerator
 
 # Import from your existing architecture
-from src.power_of_3.core.signal_generator import PowerOf3SignalGenerator
+#from src.power_of_3.core.signal_generator import PowerOf3SignalGenerator
 from ..core.types import PowerOf3Signal
 from ..database.repository import TradingDatabase
-from ..config.settings import load_config
-import yfinance as yf
-from src.power_of_3.data.providers.data_provider import DataProvider
+
 # Try to import your data provider
 try:
     from ..data.providers.data_provider import DataProvider
@@ -113,8 +118,8 @@ class BacktestResults:
 class FallbackDataProvider:
     """Fallback data provider using yfinance if DataProvider not available"""
     
-    @staticmethod
-    def get_historical_data(symbol: str, start_date: str, end_date: str, 
+    #@staticmethod
+    def get_historical_data(self, symbol: str, start_date: str, end_date: str, 
                            interval: str = '5min') -> pd.DataFrame:
         """Get historical data using yfinance"""
         try:
@@ -143,6 +148,8 @@ class FallbackDataProvider:
             ticker = yf.Ticker(yf_symbol)
             df = ticker.history(start=start_date, end=end_date, interval=yf_interval)
             
+            df = self._standardize_column_names(df)
+            
             if df.empty:
                 logger.warning(f"No data retrieved for {symbol}")
                 return pd.DataFrame()
@@ -157,6 +164,59 @@ class FallbackDataProvider:
         except Exception as e:
             logger.error(f"Error retrieving data for {symbol}: {e}")
             return pd.DataFrame()
+        
+    def _standardize_column_names(self, df):
+        """
+        Standardize column names from different data providers
+        Yahoo Finance: 'High', 'Low', 'Open', 'Close', 'Volume' 
+        Power of 3 expects: 'high', 'low', 'open', 'close', 'volume'
+        """
+        if df.empty:
+            return df
+        
+        # Column mapping from provider format to Power of 3 format
+        column_mapping = {
+            # Yahoo Finance format -> Power of 3 format
+            'Open': 'open',
+            'High': 'high', 
+            'Low': 'low',
+            'Close': 'close',
+            'Volume': 'volume',
+            
+            # Handle other possible formats
+            'OPEN': 'open',
+            'HIGH': 'high',
+            'LOW': 'low', 
+            'CLOSE': 'close',
+            'VOLUME': 'volume',
+            
+            # Some providers use different names
+            'Adj Close': 'close',  # Yahoo sometimes has this
+            'close_price': 'close',
+            'high_price': 'high',
+            'low_price': 'low',
+            'open_price': 'open'
+        }
+        
+        # Only rename columns that exist in the DataFrame
+        columns_to_rename = {
+            old_name: new_name 
+            for old_name, new_name in column_mapping.items() 
+            if old_name in df.columns
+        }
+        
+        if columns_to_rename:
+            df = df.rename(columns=columns_to_rename)
+            logger.info(f"Standardized columns: {list(columns_to_rename.keys())} -> {list(columns_to_rename.values())}")
+        
+        # Ensure we have the required columns
+        required_columns = ['open', 'high', 'low', 'close']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            raise ValueError(f"Missing required columns after standardization: {missing_columns}")
+        
+        return df
 
 class PowerOf3BacktestEngine:
     """
@@ -233,6 +293,17 @@ class PowerOf3BacktestEngine:
         # Get historical data
         df = self._get_historical_data(symbol, start_date, end_date, timeframe)
         
+        df = self._standardize_column_names(df)
+        
+        print(f"🔍 DEBUG - Columns after standardization: {df.columns.tolist()}")
+        if 'High' in df.columns:
+            print("❌ ERROR: 'High' still exists after standardization!")
+        if 'high' not in df.columns:
+            print("❌ ERROR: 'high' column missing!")
+
+        # Verify the data is properly formatted
+        print(f"Sample data:\n{df.head(2)}")
+        
         if df.empty:
             raise ValueError(f"No historical data available for {symbol}")
         
@@ -284,6 +355,59 @@ class PowerOf3BacktestEngine:
                    f"{results.total_pnl_pct:.2f}% return")
         
         return results
+    
+    def _standardize_column_names(self, df):
+        """
+        Standardize column names from different data providers
+        Yahoo Finance: 'High', 'Low', 'Open', 'Close', 'Volume' 
+        Power of 3 expects: 'high', 'low', 'open', 'close', 'volume'
+        """
+        if df.empty:
+            return df
+        
+        # Column mapping from provider format to Power of 3 format
+        column_mapping = {
+            # Yahoo Finance format -> Power of 3 format
+            'Open': 'open',
+            'High': 'high', 
+            'Low': 'low',
+            'Close': 'close',
+            'Volume': 'volume',
+            
+            # Handle other possible formats
+            'OPEN': 'open',
+            'HIGH': 'high',
+            'LOW': 'low', 
+            'CLOSE': 'close',
+            'VOLUME': 'volume',
+            
+            # Some providers use different names
+            'Adj Close': 'close',  # Yahoo sometimes has this
+            'close_price': 'close',
+            'high_price': 'high',
+            'low_price': 'low',
+            'open_price': 'open'
+        }
+        
+        # Only rename columns that exist in the DataFrame
+        columns_to_rename = {
+            old_name: new_name 
+            for old_name, new_name in column_mapping.items() 
+            if old_name in df.columns
+        }
+        
+        if columns_to_rename:
+            df = df.rename(columns=columns_to_rename)
+            logger.info(f"Standardized columns: {list(columns_to_rename.keys())} -> {list(columns_to_rename.values())}")
+        
+        # Ensure we have the required columns
+        required_columns = ['open', 'high', 'low', 'close']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            raise ValueError(f"Missing required columns after standardization: {missing_columns}")
+        
+        return df
     
     async def run_multi_symbol_backtest(self, symbols: List[str], start_date: str, 
                                        end_date: str, initial_balance: float = 10000.0,
@@ -646,6 +770,8 @@ class PowerOf3BacktestEngine:
             
         except Exception as e:
             logger.error(f"Error saving to database: {e}")
+            
+    
 
 # Usage example
 if __name__ == "__main__":
